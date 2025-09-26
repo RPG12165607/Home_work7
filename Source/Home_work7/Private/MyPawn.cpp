@@ -1,13 +1,29 @@
 
 #include "MyPawn.h"
-#include "EnhancedInputComponent.h" // EnhancedInputComponent 헤더 추가
+#include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "MyPlayerController.h"
 #include "GameFramework/PlayerController.h"
+#include "Camera/CameraComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/SpringArmComponent.h"
 
 AMyPawn::AMyPawn()
 {
     PrimaryActorTick.bCanEverTick = true;
+
+    CapsuleComp = CreateDefaultSubobject<UCapsuleComponent>(TEXT("CapsuleComp"));
+    SetRootComponent(CapsuleComp);
+    SkeletalMeshComp = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("SkeletalMeshComp"));
+    SkeletalMeshComp->SetupAttachment(CapsuleComp);
+    SpringArmComp = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
+    SpringArmComp->SetupAttachment(CapsuleComp);
+    SpringArmComp->TargetArmLength = 300.0f;
+    SpringArmComp->bUsePawnControlRotation = false;
+
+    CameraComp = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
+    CameraComp->SetupAttachment(SpringArmComp, USpringArmComponent::SocketName);
+    CameraComp->bUsePawnControlRotation = false;
 }
 
 void AMyPawn::BeginPlay()
@@ -25,23 +41,24 @@ void AMyPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
     Super::SetupPlayerInputComponent(PlayerInputComponent);
 
     if (UEnhancedInputComponent* EnhancedInput = Cast<UEnhancedInputComponent>(PlayerInputComponent))
-        // PlayerInputComponent이 다양한 방식이 있어서 EnhancedInput 기능으로 Cast 한다를 한번 선언하는것
     {
         if (AMyPlayerController* PlayerController = Cast<AMyPlayerController>(GetController()))
-            // 캐릭터를 조종하는 Controller을 가져오고 그걸 SpartaPlayerController로 Cast -> PlayerController에 변수로 진입
         {
             if (PlayerController->MoveAction)
             {
                 EnhancedInput->BindAction(PlayerController->MoveAction, ETriggerEvent::Triggered, this, &AMyPawn::Move);
-                // EnhancedInput->BindAction -> 이벤트랑 함수를 연결하는 핵심 코드
-                // PlayerController->MoveAction -> >MoveAction을 가져온다
-                // ETriggerEvent::Triggered -> 키가 눌려서 이벤트가 발생 했을때
-                // this -> 호출된 함수의 객체 ( Character의 객체 )
-                // &AMyPawn::Move -> 실제로 호출된 함수
+            }
+            if (PlayerController->FlyAction)
+            {
+                EnhancedInput->BindAction(PlayerController->FlyAction, ETriggerEvent::Triggered, this, &AMyPawn::Fly);
             }
             if (PlayerController->LookAction)
             {
                 EnhancedInput->BindAction(PlayerController->LookAction, ETriggerEvent::Triggered, this, &AMyPawn::Look);
+            }
+            if (PlayerController->RollAction)
+            {
+                EnhancedInput->BindAction(PlayerController->RollAction, ETriggerEvent::Triggered, this, &AMyPawn::Roll);
             }
         }
     }
@@ -49,12 +66,11 @@ void AMyPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 
 void AMyPawn::Move(const FInputActionValue& value)
 {
-    const FVector2D MoveInput = value.Get<FVector2D>();
-    // value에서 FVector2D를 가져와서 MoveInput에 FVector2D 형태로 저장
+    const FVector MoveInput = value.Get<FVector>();
 
     float DeltaTime = GetWorld()->GetDeltaSeconds();
 
-    FVector LocalMove = FVector(MoveInput.X, MoveInput.Y, 0.f) * MoveSpeed * DeltaTime;
+    FVector LocalMove = FVector(MoveInput.X, MoveInput.Y, 0.0f) * MoveSpeed * DeltaTime;
 
     AddActorLocalOffset(LocalMove, true);
     
@@ -68,4 +84,9 @@ void AMyPawn::Look(const FInputActionValue& value)
 
     FRotator DeltaRot(0.f, LookInput.X * TurnSpeed * DeltaTime, 0.f);
     AddActorLocalRotation(DeltaRot);
+    
+    FRotator NewRot = SpringArmComp->GetRelativeRotation();
+    NewRot.Pitch = FMath::Clamp(NewRot.Pitch + LookInput.Y * TurnSpeed * DeltaTime, -100.f, 100.f);
+    SpringArmComp->SetRelativeRotation(NewRot);
+
 }
